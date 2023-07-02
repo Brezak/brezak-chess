@@ -1,1 +1,7 @@
 [workspace]
+
+members = [
+    "board",
+]
+
+resolver = "2"
