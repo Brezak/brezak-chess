@@ -1,6 +1,7 @@
 use crate::Square;
 use derive_more::{Not, Shl, ShlAssign, Shr, ShrAssign};
 use std::fmt::{Display, Formatter};
+use std::iter::FusedIterator;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 
 #[derive(Default, Eq, PartialEq, Copy, Clone, Debug, Shl, ShlAssign, Shr, ShrAssign, Not)]
@@ -15,12 +16,108 @@ impl BitBoard {
     pub const H1_A8_ANTI_DIAGONAL: Self = Self(0x0102_0408_1020_4080);
     pub const LIGHT_SQUARES: Self = Self(0x55AA_55AA_55AA_55AA);
     pub const DARK_SQUARES: Self = Self(0xAA55_AA55_AA55_AA55);
+    pub const EMPTY: Self = Self(0);
+    pub const FULL: Self = Self(0xFFFF_FFFF_FFFF_FFFF);
+
+    // We can't use the From trait since that's not const
+    #[must_use]
+    #[inline]
+    pub const fn from_square(square: Square) -> Self {
+        Self(1 << square as u64)
+    }
+
+    /// Checks if the board isn't occupied by any pieces
+    #[must_use]
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.0 == Self::EMPTY.0
+    }
+
+    /// Returns first occupied square
+    #[must_use]
+    #[inline]
+    pub const fn first(self) -> Option<Square> {
+        if self.is_empty() {
+            None
+        } else {
+            Square::from_u64(self.0.trailing_zeros() as u64)
+        }
+    }
+
+    /// Returns last occupied square
+    #[must_use]
+    #[inline]
+    pub const fn last(self) -> Option<Square> {
+        if self.is_empty() {
+            None
+        } else {
+            Square::from_u64(63 - self.0.leading_zeros() as u64)
+        }
+    }
+
+    /// Returns the bitboard with the first occupied square removed
+    #[must_use]
+    #[inline]
+    pub const fn without_first(self) -> Self {
+        let board = self.0;
+        Self(board & board.wrapping_sub(1))
+    }
+
+    /// Returns the bitboard with the last occupied square removed
+    #[must_use]
+    #[inline]
+    pub const fn without_last(self) -> Self {
+        if self.is_empty() {
+            return Self::EMPTY;
+        }
+
+        let mask = 1 << (63 - self.0.leading_zeros() as u64);
+
+        Self(self.0 ^ mask)
+    }
+
+    #[inline]
+    pub fn discard_first(&mut self) {
+        if self.is_empty() {
+            return;
+        }
+
+        let mask = 1 << self.0.trailing_zeros();
+
+        *self ^= mask;
+    }
+
+    #[inline]
+    pub fn discard_last(&mut self) {
+        if self.is_empty() {
+            return;
+        }
+
+        let mask = 1 << (63 - self.0.leading_zeros());
+
+        *self ^= mask;
+    }
+
+    #[inline]
+    pub fn pop_first(&mut self) -> Option<Square> {
+        let piece = self.first();
+        self.discard_first();
+        piece
+    }
+
+    #[inline]
+    pub fn pop_last(&mut self) -> Option<Square> {
+        let piece = self.last();
+        self.discard_last();
+        piece
+    }
 
     #[must_use]
+    #[inline]
     pub const fn flip_vertical(self) -> Self {
         // see https://www0chessprogramming0org/Flipping_Mirroring_and_Rotating#FlipVertically
 
-        BitBoard(self.0.swap_bytes())
+        Self(self.0.swap_bytes())
     }
 
     #[must_use]
@@ -92,46 +189,77 @@ impl BitBoard {
     }
 
     #[must_use]
+    #[inline]
     pub const fn north(self) -> Self {
         Self(self.0 << 8)
     }
 
     #[must_use]
+    #[inline]
     pub const fn south(self) -> Self {
         Self(self.0 >> 8)
     }
 
     #[must_use]
+    #[inline]
     pub const fn east(self) -> Self {
         Self((self.0 << 1) & !Self::A_FILE.0)
     }
 
     #[must_use]
+    #[inline]
     pub const fn west(self) -> Self {
         Self((self.0 >> 1) & !Self::H_FILE.0)
     }
 
     #[must_use]
+    #[inline]
     pub const fn north_east(self) -> Self {
         Self((self.0 << 9) & !Self::A_FILE.0)
     }
 
     #[must_use]
+    #[inline]
     pub const fn south_east(self) -> Self {
         Self((self.0 >> 7) & !Self::A_FILE.0)
     }
 
     #[must_use]
+    #[inline]
     pub const fn north_west(self) -> Self {
         Self((self.0 << 7) & !Self::H_FILE.0)
     }
 
     #[must_use]
+    #[inline]
     pub const fn south_west(self) -> Self {
         Self((self.0 >> 9) & !Self::H_FILE.0)
     }
 
+    #[must_use]
+    pub fn to_nice_display(self) -> String {
+        let mut result = String::with_capacity(128);
 
+        for byte in self.0.to_be_bytes() {
+            for index in 0..u8::BITS {
+                let separator = if index == 7 { '\n' } else { ' ' };
+
+                let is_bit_one = (byte >> index) & 0x1 == 1;
+
+                if is_bit_one {
+                    result.push('1');
+                } else {
+                    result.push('.');
+                }
+
+                result.push(separator);
+            }
+
+            result.push(' ');
+        }
+
+        result
+    }
 }
 
 impl From<u64> for BitBoard {
@@ -256,10 +384,7 @@ impl<T: Into<Self>> BitAndAssign<T> for BitBoard {
 impl Display for BitBoard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
-            writeln!(f)?;
-            for byte in self.0.to_be_bytes() {
-                writeln!(f, "{:08b}", byte.reverse_bits())?;
-            }
+            writeln!(f, "{}", self.to_nice_display())?;
             Ok(())
         } else {
             write!(f, "{:08b}", self.0)
@@ -267,6 +392,48 @@ impl Display for BitBoard {
     }
 }
 
+impl IntoIterator for BitBoard {
+    type Item = Square;
+    type IntoIter = IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter { board: self }
+    }
+}
+
+/// An iterator over the occupied squares of the bitboard
+pub struct IntoIter {
+    board: BitBoard,
+}
+
+impl Iterator for IntoIter {
+    type Item = Square;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.board.pop_first()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.board.0.count_ones() as usize;
+
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for IntoIter {
+    fn len(&self) -> usize {
+        // Manual implementation to guarantee that this function doesn't panic
+        self.board.0.count_ones() as usize
+    }
+}
+
+impl DoubleEndedIterator for IntoIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.board.pop_last()
+    }
+}
+
+impl FusedIterator for IntoIter {}
 
 #[cfg(test)]
 mod tests {
@@ -327,6 +494,28 @@ mod tests {
             "Flip horizontal"
         );
 
-        assert_eq!(BitBoard(r).flip_horizontal().flip_vertical(), BitBoard(r).flip_vertical().flip_horizontal());
+        assert_eq!(
+            BitBoard(r).flip_horizontal().flip_vertical(),
+            BitBoard(r).flip_vertical().flip_horizontal()
+        );
+    }
+
+    #[test]
+    fn iterate_empty() {
+        let empty = BitBoard::EMPTY;
+        assert_eq!(empty.into_iter().count(), 0);
+    }
+
+    #[test]
+    fn iterate_full() {
+        let full = BitBoard::FULL;
+        assert!(full.into_iter().eq(Square::ALL_SQUARES));
+    }
+
+    #[test]
+    fn iterate_last() {
+        let mut last = BitBoard(0x8000_0000_0000_0000).into_iter();
+
+        assert_eq!(last.next(), Some(Square::H8));
     }
 }

@@ -1,8 +1,10 @@
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Color {
     Black,
     White,
 }
 
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Role {
     Pawn,
     Knight,
@@ -12,6 +14,7 @@ pub enum Role {
     King,
 }
 
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Piece {
     WhitePawn,
     WhiteKnight,
@@ -29,6 +32,7 @@ pub enum Piece {
 
 impl Piece {
     #[must_use]
+    #[inline]
     pub const fn from_parts(color: Color, role: Role) -> Self {
         #[allow(clippy::enum_glob_use)]
         use {Color::*, Piece::*, Role::*};
